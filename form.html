@@ -18,24 +18,20 @@
         <label for="serviceType" class="form-label">Service Type</label>
         <select class="form-select" id="serviceType">
           <option selected disabled>Select vehicle</option>
-          <option>L300</option>
-          <option>4 Wheeler</option>
-          <option>6 Wheeler</option>
-          <option>6WF</option>
-          <option>10 Wheeler</option>
         </select>
+
       </div>
 
       <div class="mb-3 row align-items-end">
         <div class="col">
-          <label class="form-label">KM From</label>
+          <label class="form-label">Distance From</label>
           <div class="input-group">
             <span class="input-group-text">KM</span>
             <input type="number" class="form-control" placeholder="From">
           </div>
         </div>
         <div class="col">
-          <label class="form-label">KM To</label>
+          <label class="form-label">Distance To</label>
           <div class="input-group">
             <span class="input-group-text">KM</span>
             <input type="number" class="form-control" placeholder="To">
@@ -45,17 +41,17 @@
 
       <div class="mb-3 row">
         <div class="col">
-          <label class="form-label">Selling Price (SP)</label>
+          <label class="form-label">Selling Prices</label>
           <div class="input-group">
             <span class="input-group-text">₱</span>
             <input type="number" class="form-control" placeholder="Selling">
           </div>
         </div>
         <div class="col">
-          <label class="form-label">Standard Price (SP)</label>
+          <label class="form-label">Service Provider (SP)</label>
           <div class="input-group">
             <span class="input-group-text">₱</span>
-            <input type="number" class="form-control" placeholder="SP">
+            <input type="number" class="form-control" placeholder="Service Provider">
           </div>
         </div>
       </div>
@@ -87,13 +83,13 @@
           <tbody>
             <!-- Dynamic rows go here -->
             <tr>
-              <td>0 - 10</td>
+              <!-- <td>0 - 10</td>
               <td>₱150</td>
               <td>₱10</td>
               <td>₱120</td>
               <td>₱10</td>
               <td>₱30</td>
-              <td>25%</td>
+              <td>25%</td> -->
             </tr>
             <!-- Add more rows via JS later -->
           </tbody>
@@ -105,3 +101,61 @@
 
 </body>
 </html>
+
+<script>
+  async function fetchServiceUnitRates() {
+    try {
+      const response = await fetch('https://tms.ehatid.co/api/getServiceUnitRate');
+      if (!response.ok) throw new Error('Failed to fetch data');
+      const data = await response.json();
+
+      populateServiceTypeOptions(data);
+      populateRateTable(data);
+    } catch (error) {
+      console.error('Error fetching service unit rates:', error);
+    }
+  }
+
+  function populateServiceTypeOptions(data) {
+    const select = document.getElementById('serviceType');
+    const sortedData = [...data].sort((a, b) => a.rate_id - b.rate_id);
+
+    const seen = new Set();
+
+    sortedData.forEach(item => {
+      if (!seen.has(item.service_type)) {
+        seen.add(item.service_type);
+
+        const option = document.createElement('option');
+        option.value = item.service_type;
+        option.textContent = item.service_type;
+        select.appendChild(option);
+      }
+    });
+  }
+
+  function populateRateTable(data) {
+    const tbody = document.querySelector('tbody');
+    tbody.innerHTML = ''; // Clear existing rows
+
+    data.forEach(item => {
+      const marginRevenue = item.selling_km_rate - item.sp_km_rate;
+      const marginPercent = ((marginRevenue / item.sp_km_rate) * 100).toFixed(2);
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${item.km_range_from} - ${item.km_range_to}</td>
+        <td>₱${item.selling_km_rate}</td>
+        <td>₱${item.selling_drop_rate}</td>
+        <td>₱${item.sp_km_rate}</td>
+        <td>₱${item.sp_drop_rate}</td>
+        <td>₱${marginRevenue}</td>
+        <td>${marginPercent}%</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  fetchServiceUnitRates();
+</script>
+
