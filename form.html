@@ -19,22 +19,21 @@
         <select class="form-select" id="serviceType">
           <option selected disabled>Select vehicle</option>
         </select>
-
       </div>
 
       <div class="mb-3 row align-items-end">
         <div class="col">
           <label class="form-label">Distance From</label>
           <div class="input-group">
-            <span class="input-group-text">KM</span>
-            <input type="number" class="form-control" placeholder="From">
+            <span class="input-group-text">km</span>
+            <input type="number" class="form-control" id="fromKM" placeholder="From">
           </div>
         </div>
         <div class="col">
           <label class="form-label">Distance To</label>
           <div class="input-group">
-            <span class="input-group-text">KM</span>
-            <input type="number" class="form-control" placeholder="To">
+            <span class="input-group-text">km</span>
+            <input type="number" class="form-control" id="toKM" placeholder="To">
           </div>
         </div>
       </div>
@@ -44,19 +43,19 @@
           <label class="form-label">Selling Prices</label>
           <div class="input-group">
             <span class="input-group-text">₱</span>
-            <input type="number" class="form-control" placeholder="Selling">
+            <input type="number" class="form-control" id="sellingRate" placeholder="Selling">
           </div>
         </div>
         <div class="col">
           <label class="form-label">Service Provider (SP)</label>
           <div class="input-group">
             <span class="input-group-text">₱</span>
-            <input type="number" class="form-control" placeholder="Service Provider">
+            <input type="number" class="form-control" id="spRate" placeholder="SP">
           </div>
         </div>
       </div>
 
-      <button class="btn btn-success w-100">Add</button>
+      <button onclick="saveServiceRate()" class="btn btn-success w-100" id="submitBtn">Add</button>
     </div>
 
     <!-- Right Column: Table -->
@@ -70,6 +69,7 @@
               <th colspan="2">SELLING</th>
               <th colspan="2">SP</th>
               <th colspan="2">MARGIN</th>
+              <th colspan="2">Actions</th>
             </tr>
             <tr>
               <th>Rate</th>
@@ -78,20 +78,12 @@
               <th>Drop</th>
               <th>Revenue</th>
               <th>%</th>
+              <th>Delete</th>
+              <th>Edit</th>
             </tr>
           </thead>
-          <tbody>
-            <!-- Dynamic rows go here -->
-            <tr>
-              <!-- <td>0 - 10</td>
-              <td>₱150</td>
-              <td>₱10</td>
-              <td>₱120</td>
-              <td>₱10</td>
-              <td>₱30</td>
-              <td>25%</td> -->
-            </tr>
-            <!-- Add more rows via JS later -->
+          <tbody id="rateTableBody">
+            <!-- Dynamic rows will appear here -->
           </tbody>
         </table>
       </div>
@@ -99,18 +91,18 @@
   </div>
 </div>
 
-</body>
-</html>
-
 <script>
+  let rateData = [];
+  let editingIndex = null;
+
   async function fetchServiceUnitRates() {
     try {
       const response = await fetch('https://tms.ehatid.co/api/getServiceUnitRate');
       if (!response.ok) throw new Error('Failed to fetch data');
       const data = await response.json();
 
+      rateData = data;
       populateServiceTypeOptions(data);
-      populateRateTable(data);
     } catch (error) {
       console.error('Error fetching service unit rates:', error);
     }
@@ -119,13 +111,11 @@
   function populateServiceTypeOptions(data) {
     const select = document.getElementById('serviceType');
     const sortedData = [...data].sort((a, b) => a.rate_id - b.rate_id);
-
     const seen = new Set();
 
     sortedData.forEach(item => {
       if (!seen.has(item.service_type)) {
         seen.add(item.service_type);
-
         const option = document.createElement('option');
         option.value = item.service_type;
         option.textContent = item.service_type;
@@ -135,10 +125,10 @@
   }
 
   function populateRateTable(data) {
-    const tbody = document.querySelector('tbody');
-    tbody.innerHTML = ''; // Clear existing rows
+    const tbody = document.getElementById('rateTableBody');
+    tbody.innerHTML = '';
 
-    data.forEach(item => {
+    data.forEach((item, index) => {
       const marginRevenue = item.selling_km_rate - item.sp_km_rate;
       const marginPercent = ((marginRevenue / item.sp_km_rate) * 100).toFixed(2);
 
@@ -151,11 +141,122 @@
         <td>₱${item.sp_drop_rate}</td>
         <td>₱${marginRevenue}</td>
         <td>${marginPercent}%</td>
+        <td>
+          <button class="btn btn-sm btn-danger" onclick="deleteRate(${index})">Delete</button>
+        </td>
+        <td>
+          <button class="btn btn-sm btn-warning" onclick="editRate(${index})">Edit</button>
+        </td>
       `;
       tbody.appendChild(tr);
     });
   }
 
+  function isOverlappingRange(serviceType, fromKM, toKM, ignoreIndex = null) {
+    return rateData.some((item, index) => {
+      if (index === ignoreIndex || item.service_type !== serviceType) return false;
+      const existingFrom = item.km_range_from;
+      const existingTo = item.km_range_to;
+      return (
+        (fromKM >= existingFrom && fromKM <= existingTo) ||
+        (toKM >= existingFrom && toKM <= existingTo) ||
+        (fromKM <= existingFrom && toKM >= existingTo)  
+      );
+    });
+  }
+
+  async function saveServiceRate() {
+    const serviceType = document.getElementById("serviceType").value;
+    const fromKM = parseFloat(document.getElementById("fromKM").value);
+    const toKM = parseFloat(document.getElementById("toKM").value);
+    const sellingRate = parseFloat(document.getElementById("sellingRate").value);
+    const spRate = parseFloat(document.getElementById("spRate").value);
+
+    if (!serviceType || isNaN(fromKM) || isNaN(toKM) || isNaN(sellingRate) || isNaN(spRate)) {
+      alert("Please fill in all fields.");
+      return;
+    }
+
+    if (fromKM >= toKM) {
+      alert("Distance From must be less than Distance To.");
+      return;
+    }
+
+    const rate = {
+      service_type: serviceType,
+      km_range_from: fromKM,
+      km_range_to: toKM,
+      selling_km_rate: sellingRate,
+      selling_drop_rate: 10,
+      sp_km_rate: spRate,
+      sp_drop_rate: 10,
+      account: "base_rate",
+      status_active: true,
+      date_active: "",
+      date_inactive: "",
+      remarks: ""
+    };
+
+    try {
+      const response = await fetch("https://tms.ehatid.co/api/addServiceUnitRate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(rate)
+      });
+
+      if (!response.ok) throw new Error("Failed to save");
+
+      const result = await response.json();
+      alert("Saved successfully!");
+
+    } catch (error) {
+      console.error(error);
+      alert("Error saving rate.");
+    }
+  }
+
+
+  function editRate(index) {
+    const item = rateData[index];
+    document.getElementById("serviceType").value = item.service_type;
+    document.getElementById("fromKM").value = item.km_range_from;
+    document.getElementById("toKM").value = item.km_range_to;
+    document.getElementById("sellingRate").value = item.selling_km_rate;
+    document.getElementById("spRate").value = item.sp_km_rate;
+
+    editingIndex = index;
+    document.getElementById("submitBtn").textContent = "Update";
+  }
+
+  function deleteRate(index) {
+    if (confirm("Are you sure you want to delete this rate?")) {
+      rateData.splice(index, 1);
+      const selectedType = document.getElementById("serviceType").value;
+      const filtered = rateData.filter(item => item.service_type === selectedType);
+      populateRateTable(filtered);
+    }
+  }
+
+  function clearForm() {
+    document.getElementById("fromKM").value = '';
+    document.getElementById("toKM").value = '';
+    document.getElementById("sellingRate").value = '';
+    document.getElementById("spRate").value = '';
+    editingIndex = null;
+    document.getElementById("submitBtn").textContent = "Add";
+  }
+
+  document.getElementById('serviceType').addEventListener('change', function () {
+    const selectedType = this.value;
+    const filtered = rateData.filter(item => item.service_type === selectedType);
+    populateRateTable(filtered);
+    clearForm();
+  });
+
   fetchServiceUnitRates();
 </script>
 
+</body>
+</html>
