@@ -40,17 +40,34 @@
 
       <div class="mb-3 row">
         <div class="col">
-          <label class="form-label">Selling Prices</label>
+          <label class="form-label">Selling Rate (KM)</label>
           <div class="input-group">
             <span class="input-group-text">₱</span>
-            <input type="number" class="form-control" id="sellingRate" placeholder="Selling">
+            <input type="number" class="form-control" id="sellingRate" placeholder="Selling per KM">
           </div>
         </div>
         <div class="col">
-          <label class="form-label">Service Provider (SP)</label>
+          <label class="form-label">SP Rate (KM)</label>
           <div class="input-group">
             <span class="input-group-text">₱</span>
-            <input type="number" class="form-control" id="spRate" placeholder="SP">
+            <input type="number" class="form-control" id="spRate" placeholder="SP per KM">
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-3 row">
+        <div class="col">
+          <label class="form-label">Selling Drop Rate</label>
+          <div class="input-group">
+            <span class="input-group-text">₱</span>
+            <input type="number" class="form-control" id="sellingDrop" placeholder="Drop Fee">
+          </div>
+        </div>
+        <div class="col">
+          <label class="form-label">SP Drop Rate</label>
+          <div class="input-group">
+            <span class="input-group-text">₱</span>
+            <input type="number" class="form-control" id="spDrop" placeholder="SP Drop Fee">
           </div>
         </div>
       </div>
@@ -93,7 +110,8 @@
 
 <script>
   let rateData = [];
-  let editingIndex = null;
+  let currentFilteredData = []; // Store currently filtered data
+  let editingRateId = null; // Use rate_id instead of index
 
   async function fetchServiceUnitRates() {
     try {
@@ -127,6 +145,9 @@
   function populateRateTable(data) {
     const tbody = document.getElementById('rateTableBody');
     tbody.innerHTML = '';
+    
+    // Store the filtered data for edit operations
+    currentFilteredData = data;
 
     data.forEach((item, index) => {
       const marginRevenue = item.selling_km_rate - item.sp_km_rate;
@@ -142,7 +163,7 @@
         <td>₱${marginRevenue}</td>
         <td>${marginPercent}%</td>
         <td>
-          <button class="btn btn-sm btn-danger" onclick="deleteRate(${index})">Delete</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteRate(${item.rate_id})">Delete</button>
         </td>
         <td>
           <button class="btn btn-sm btn-warning" onclick="editRate(${index})">Edit</button>
@@ -152,9 +173,9 @@
     });
   }
 
-  function isOverlappingRange(serviceType, fromKM, toKM, ignoreIndex = null) {
-    return rateData.some((item, index) => {
-      if (index === ignoreIndex || item.service_type !== serviceType) return false;
+  function isOverlappingRange(serviceType, fromKM, toKM, ignoreRateId = null) {
+    return rateData.some((item) => {
+      if (item.rate_id === ignoreRateId || item.service_type !== serviceType) return false;
       const existingFrom = item.km_range_from;
       const existingTo = item.km_range_to;
       return (
@@ -171,25 +192,33 @@
     const toKM = parseFloat(document.getElementById("toKM").value);
     const sellingRate = parseFloat(document.getElementById("sellingRate").value);
     const spRate = parseFloat(document.getElementById("spRate").value);
+    const sellingDrop = parseFloat(document.getElementById("sellingDrop").value);
+    const spDrop = parseFloat(document.getElementById("spDrop").value);
 
-    if (!serviceType || isNaN(fromKM) || isNaN(toKM) || isNaN(sellingRate) || isNaN(spRate)) {
+    if (
+      !serviceType || isNaN(fromKM) || isNaN(toKM) ||
+      isNaN(sellingRate) || isNaN(spRate) ||
+      isNaN(sellingDrop) || isNaN(spDrop)
+    ) {
       alert("Please fill in all fields.");
       return;
     }
 
-    if (fromKM >= toKM) {
-      alert("Distance From must be less than Distance To.");
+    // Check for overlapping ranges
+    if (isOverlappingRange(serviceType, fromKM, toKM, editingRateId)) {
+      alert("Distance range overlaps with existing range for this service type.");
       return;
     }
 
+    // Prepare rate object
     const rate = {
       service_type: serviceType,
       km_range_from: fromKM,
       km_range_to: toKM,
       selling_km_rate: sellingRate,
-      selling_drop_rate: 10,
+      selling_drop_rate: sellingDrop,
       sp_km_rate: spRate,
-      sp_drop_rate: 10,
+      sp_drop_rate: spDrop,
       account: "base_rate",
       status_active: true,
       date_active: "",
@@ -197,54 +226,123 @@
       remarks: ""
     };
 
+    // Check if editing
+    const isEditing = editingRateId !== null;
+    if (isEditing) {
+      rate.rate_id = editingRateId;
+    }
+
     try {
-      const response = await fetch("https://tms.ehatid.co/api/addServiceUnitRate", {
-        method: "POST",
+      const response = await fetch(`https://tms.ehatid.co/api/${isEditing ? "editServiceUnitRate" : "addServiceUnitRate"}`, {
+        method: isEditing ? "PUT" : "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify(rate)
       });
 
-      if (!response.ok) throw new Error("Failed to save");
+      if (!response.ok) throw new Error(`${isEditing ? "Update" : "Save"} failed`);
 
       const result = await response.json();
-      alert("Saved successfully!");
+      alert(`${isEditing ? "Updated" : "Saved"} successfully!`);
+
+      // Refresh local data and UI
+      if (isEditing) {
+        // Find and update the item in rateData
+        const index = rateData.findIndex(item => item.rate_id === editingRateId);
+        if (index !== -1) {
+          rateData[index] = { ...rate };
+        }
+        editingRateId = null;
+      } else {
+        // Add new item to rateData
+        rateData.push(result.rate || rate);
+      }
+
+      document.getElementById("submitBtn").textContent = "Add";
+      clearForm();
+
+      // Refresh the table with current service type
+      const filtered = rateData.filter(item => item.service_type === serviceType);
+      populateRateTable(filtered);
 
     } catch (error) {
       console.error(error);
-      alert("Error saving rate.");
+      alert(`Error ${isEditing ? "updating" : "saving"} rate.`);
     }
   }
 
+  function editRate(filteredIndex) {
+    // Get the item from the filtered data using the table index
+    const item = currentFilteredData[filteredIndex];
+    
+    if (!item) {
+      alert("Error: Unable to find the selected rate data.");
+      return;
+    }
 
-  function editRate(index) {
-    const item = rateData[index];
+    // Fill form fields with the selected row's data
     document.getElementById("serviceType").value = item.service_type;
     document.getElementById("fromKM").value = item.km_range_from;
     document.getElementById("toKM").value = item.km_range_to;
     document.getElementById("sellingRate").value = item.selling_km_rate;
     document.getElementById("spRate").value = item.sp_km_rate;
+    document.getElementById("sellingDrop").value = item.selling_drop_rate;
+    document.getElementById("spDrop").value = item.sp_drop_rate;
 
-    editingIndex = index;
+    // Set edit mode using rate_id
+    editingRateId = item.rate_id;
     document.getElementById("submitBtn").textContent = "Update";
   }
 
-  function deleteRate(index) {
+  async function deleteRate(rateId) {
     if (confirm("Are you sure you want to delete this rate?")) {
-      rateData.splice(index, 1);
-      const selectedType = document.getElementById("serviceType").value;
-      const filtered = rateData.filter(item => item.service_type === selectedType);
-      populateRateTable(filtered);
+      try {
+        const response = await fetch(`https://tms.ehatid.co/api/deleteServiceUnitRate`, {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ rate_id: rateId })
+        });
+
+        if (!response.ok) throw new Error("Delete failed");
+
+        alert("Rate deleted successfully!");
+        
+        // Remove from local data
+        rateData = rateData.filter(item => item.rate_id !== rateId);
+        
+        // Refresh the table
+        const selectedType = document.getElementById("serviceType").value;
+        if (selectedType) {
+          const filtered = rateData.filter(item => item.service_type === selectedType);
+          populateRateTable(filtered);
+        }
+        
+        // Clear form if we were editing the deleted item
+        if (editingRateId === rateId) {
+          clearForm();
+        }
+        
+      } catch (error) {
+        console.error("Error deleting rate:", error);
+        alert("Error deleting rate.");
+      }
     }
   }
 
-  function clearForm() {
+  function clearForm(preserveServiceType = false) {
+    if (!preserveServiceType) {
+      document.getElementById("serviceType").value = '';
+    }
     document.getElementById("fromKM").value = '';
     document.getElementById("toKM").value = '';
     document.getElementById("sellingRate").value = '';
     document.getElementById("spRate").value = '';
-    editingIndex = null;
+    document.getElementById("sellingDrop").value = '';
+    document.getElementById("spDrop").value = '';
+    editingRateId = null;
     document.getElementById("submitBtn").textContent = "Add";
   }
 
@@ -252,7 +350,7 @@
     const selectedType = this.value;
     const filtered = rateData.filter(item => item.service_type === selectedType);
     populateRateTable(filtered);
-    clearForm();
+    clearForm(true);
   });
 
   fetchServiceUnitRates();
